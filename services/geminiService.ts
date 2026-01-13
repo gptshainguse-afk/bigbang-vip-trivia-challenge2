@@ -2,8 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
-// 在 Vercel 環境中，如果是純客戶端 ESM，可能需要確保 API_KEY 有正確讀取
-// 注意：生產環境建議透過後端轉發以保護 API Key，但此處遵循原架構
 const getApiKey = () => {
   return process.env.API_KEY || (window as any)._ENV_?.API_KEY || '';
 };
@@ -12,16 +10,16 @@ export const generateBigBangQuestions = async (): Promise<Question[]> => {
   const apiKey = getApiKey();
   const ai = new GoogleGenAI({ apiKey });
 
-  const prompt = `You are a BIGBANG super-fan (V.I.P). Generate exactly 10 fun and challenging trivia questions about the 4 members: G-Dragon, T.O.P, Taeyang, and Daesung. 
-  
-  CRITICAL RULES:
-  1. DO NOT include any questions or answers related to Seungri.
-  2. Every question's answer MUST be one of these four: "G-Dragon", "T.O.P", "Taeyang", or "Daesung".
-  3. Focus on funny stories, variety show moments, music records, unique fashion choices, and gossip/secrets.
-  4. Ensure the questions are diverse and entertaining.
-  5. Provide a short 'funFact' for the host to read.
-  
-  Return a JSON array of objects with the fields: id (int), text (string), correctAnswer (string), and funFact (string).`;
+  const prompt = `你是一位 BIGBANG 的資深超級粉絲 (V.I.P)。請生成 10 題關於成員：G-Dragon, T.O.P, Taeyang, Daesung 的有趣且具挑戰性的問答題。
+
+  絕對規則：
+  1. 題目內容必須使用「繁體中文」。
+  2. 絕對不能出現關於「勝利 (Seungri)」或答案是「勝利」的任何內容。
+  3. 每題的正確答案必須是這四個人之一："G-Dragon", "T.O.P", "Taeyang", 或 "Daesung"。
+  4. 題目主題：綜藝節目名場面（如《家族誕生》、《無限挑戰》）、音樂紀錄、成員間的趣事、獨特的時尚風格、鮮為人知的祕密。
+  5. 每一題請提供一個簡短的「趣味事實 (funFact)」供主持人宣讀。
+
+  請回傳一個 JSON 陣列，包含：id (int), text (string), correctAnswer (string), funFact (string)。`;
 
   try {
     const response = await ai.models.generateContent({
@@ -36,7 +34,7 @@ export const generateBigBangQuestions = async (): Promise<Question[]> => {
             properties: {
               id: { type: Type.INTEGER },
               text: { type: Type.STRING },
-              correctAnswer: { type: Type.STRING, description: "Must be one of: G-Dragon, T.O.P, Taeyang, Daesung" },
+              correctAnswer: { type: Type.STRING, description: "必須是 G-Dragon, T.O.P, Taeyang, Daesung 其中之一" },
               funFact: { type: Type.STRING }
             },
             required: ["id", "text", "correctAnswer", "funFact"]
@@ -48,17 +46,13 @@ export const generateBigBangQuestions = async (): Promise<Question[]> => {
     return JSON.parse(response.text || '[]');
   } catch (error) {
     console.error("Error generating questions:", error);
+    // 備用中文題目
     return [
-      { id: 1, text: "Which member is known for having a massive collection of high-end furniture and once joked his house is like a museum?", correctAnswer: "T.O.P", funFact: "T.O.P's art and chair collection is world-renowned!" },
-      { id: 2, text: "Who was famously called the 'Smiling Angel' but is also known for his powerful rock-vocals and trot singing?", correctAnswer: "Daesung", funFact: "Daesung's Japanese solo career as D-Lite is incredibly successful!" },
-      { id: 3, text: "Which member released the hit solo 'Eyes, Nose, Lips' which was inspired by his now-wife Min Hyo-rin?", correctAnswer: "Taeyang", funFact: "Taeyang was the first member to get married." },
-      { id: 4, text: "Who is the legendary leader of the group, known as the 'King of K-Pop' and a global fashion icon?", correctAnswer: "G-Dragon", funFact: "GD became a trainee at YG when he was only 12 years old." },
-      { id: 5, text: "On 'Family Outing', which member was known for his hilarious chemistry with Yoo Jae-suk as the 'Dumb and Dumber' duo?", correctAnswer: "Daesung", funFact: "Daesung was a variety show king in the late 2000s!" },
-      { id: 6, text: "Which member has a pet dog named 'Gaho' that became almost as famous as he was during the 'Heartbreaker' era?", correctAnswer: "G-Dragon", funFact: "Gaho is a Shar Pei and has appeared in many music videos." },
-      { id: 7, text: "Who is known for his deep bass voice and for being the 'Visual' who loves pink but acts very charismatic on stage?", correctAnswer: "T.O.P", funFact: "T.O.P was an underground rapper named Tempo before BIGBANG." },
-      { id: 8, text: "Which member is widely considered the best dancer in the group and is famous for his soulful R&B vocals?", correctAnswer: "Taeyang", funFact: "Taeyang's name means 'Sun' because he wanted to be a bright light for the world." },
-      { id: 9, text: "Who famously wrote and produced the mega-hit 'Lies' which was originally intended to be his solo song?", correctAnswer: "G-Dragon", funFact: "GD has over 170 songs registered under his name for royalties." },
-      { id: 10, text: "Which member is known to be the most 'modest' and once said he prefers to stay at home rather than go out to clubs?", correctAnswer: "Daesung", funFact: "Daesung is known for his polite and humble personality." }
+      { id: 1, text: "哪位成員以收藏頂級家具聞名，甚至曾開玩笑說自己的家就像博物館？", correctAnswer: "T.O.P", funFact: "T.O.P 的椅子收藏在藝術界非常出名！" },
+      { id: 2, text: "誰曾被稱為「微笑天使」，除了強大的搖滾唱功，也出過多首熱門的 Trot (演歌) 單曲？", correctAnswer: "Daesung", funFact: "大聲在日本以 D-Lite 身份活動非常成功。" },
+      { id: 3, text: "經典神曲《眼、鼻、嘴》是哪位成員寫給當時的女友（現任妻子）閔孝琳的歌曲？", correctAnswer: "Taeyang", funFact: "這首歌發行後成為了國民婚禮祝歌。" },
+      { id: 4, text: "BIGBANG 的隊長，被譽為「K-Pop 之王」，也是引領全球流行的時尚指標是誰？", correctAnswer: "G-Dragon", funFact: "GD 12歲就進入 YG 當練習生。" },
+      { id: 5, text: "在綜藝節目《家族誕生》中，哪位成員與劉在錫組成了爆笑的「阿呆阿瓜」組合？", correctAnswer: "Daesung", funFact: "大聲是當時演藝圈公認的綜藝天才。" }
     ];
   }
 };
