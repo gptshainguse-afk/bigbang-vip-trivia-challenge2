@@ -53,7 +53,6 @@ export default function App() {
     peer.on('connection', (conn) => {
       conn.on('open', () => {
         connectionsRef.current.set(conn.peer, conn);
-        // 當有新玩家連線時，同步一次當前狀態
         sendToConnection(conn, {
           type: 'SYNC_STATE',
           gameState,
@@ -68,8 +67,7 @@ export default function App() {
         if (data.type === 'PLAYER_JOIN') {
           setPlayers(prev => {
             if (prev.find(p => p.id === data.player.id)) return prev;
-            const updated = [...prev, data.player];
-            return updated;
+            return [...prev, data.player];
           });
         }
         if (data.type === 'PLAYER_ANSWER') {
@@ -105,10 +103,28 @@ export default function App() {
 
       conn.on('data', (data: any) => {
         if (data.type === 'SYNC_STATE') {
-          setGameState(data.gameState);
-          setCurrentIndex(data.currentQuestionIndex);
+          // 偵測題號是否改變
+          setGameState(prevGameState => {
+            setCurrentIndex(prevIndex => {
+              // 如果題號變了，重置玩家本地答題狀態
+              if (data.currentQuestionIndex !== prevIndex) {
+                setCurrentPlayer(p => p ? { ...p, lastAnswer: undefined, isCorrect: undefined } : null);
+                setShuffledMembers(shuffleArray(MEMBERS));
+              }
+              return data.currentQuestionIndex;
+            });
+            return data.gameState;
+          });
+          
           setPlayers(data.players);
           setQuestions(data.questions || []);
+          
+          // 更新本地玩家的分數
+          setCurrentPlayer(p => {
+            if (!p) return null;
+            const updated = data.players.find((player: Player) => player.id === p.id);
+            return updated ? { ...p, score: updated.score } : p;
+          });
         }
       });
 
@@ -134,7 +150,6 @@ export default function App() {
     });
   }, []);
 
-  // 當母體狀態改變時，同步給所有玩家
   useEffect(() => {
     if (role === GameRole.HOST && peerStatus === 'CONNECTED') {
       broadcast({
@@ -153,6 +168,8 @@ export default function App() {
   const handlePlayerAnswer = (playerId: string, answer: string) => {
     setPlayers(prev => prev.map(p => {
       if (p.id === playerId) {
+        // 防止重複加分
+        if (p.lastAnswer) return p;
         const isCorrect = answer === questions[currentIndex]?.correctAnswer;
         return { ...p, lastAnswer: answer, isCorrect, score: isCorrect ? p.score + 100 : p.score };
       }
@@ -162,10 +179,11 @@ export default function App() {
 
   const nextQuestion = () => {
     if (currentIndex < questions.length - 1) {
-      setCurrentIndex(prev => prev + 1);
+      const nextIdx = currentIndex + 1;
+      setPlayers(prev => prev.map(p => ({ ...p, lastAnswer: undefined, isCorrect: undefined })));
+      setCurrentIndex(nextIdx);
       setGameState(GameState.QUESTION);
       setShuffledMembers(shuffleArray(MEMBERS));
-      setPlayers(prev => prev.map(p => ({ ...p, lastAnswer: undefined, isCorrect: undefined })));
     } else {
       setGameState(GameState.FINISHED);
     }
@@ -173,12 +191,23 @@ export default function App() {
 
   const submitAnswer = (answer: string) => {
     if (!currentPlayer || currentPlayer.lastAnswer || gameState !== GameState.QUESTION) return;
-    hostConnRef.current?.send({ type: 'PLAYER_ANSWER', playerId: currentPlayer.id, answer });
+    
+    // 更新本地顯示為已送出
     setCurrentPlayer(prev => prev ? { ...prev, lastAnswer: answer } : null);
+    
+    // 送往母體
+    if (hostConnRef.current?.open) {
+      hostConnRef.current.send({ 
+        type: 'PLAYER_ANSWER', 
+        playerId: currentPlayer.id, 
+        answer 
+      });
+    }
   };
 
   const joinGame = (name: string) => {
-    const newPlayer: Player = { id: Math.random().toString(36).substring(7), name, score: 0 };
+    const newId = Math.random().toString(36).substring(7);
+    const newPlayer: Player = { id: newId, name, score: 0 };
     setCurrentPlayer(newPlayer);
     hostConnRef.current?.send({ type: 'PLAYER_JOIN', player: newPlayer });
   };
@@ -205,7 +234,7 @@ export default function App() {
             disabled={isSyncing}
             className="w-full bg-yellow-400 text-black font-black py-6 rounded-2xl hover:bg-yellow-300 transition-all shadow-xl text-2xl uppercase tracking-widest"
           >
-            {isSyncing ? '連線中...' : '開場 (母體投影)'}
+            {isSyncing ? '正在生成中文題目...' : '開場 (母體投影)'}
           </button>
         </div>
         <p className="text-white/20 text-xs font-mono uppercase tracking-[0.2em]">Cross-Device P2P Powered</p>
@@ -213,7 +242,6 @@ export default function App() {
     );
   }
 
-  // 母體視圖
   if (role === GameRole.HOST) {
     return (
       <div className="min-h-screen p-8 max-w-6xl mx-auto flex flex-col bg-black">
@@ -228,7 +256,7 @@ export default function App() {
             </div>
           </div>
           <div className="text-right">
-            <div className="text-yellow-400 font-black text-2xl">VIPS: {players.length}</div>
+            <div className="text-yellow-400 font-black text-2xl">VIPs: {players.length}</div>
             <div className="text-[10px] text-white/20 font-mono">ROOM: {sessionId}</div>
           </div>
         </header>
@@ -261,9 +289,12 @@ export default function App() {
             <div className="w-full space-y-12 text-center animate-in fade-in slide-in-from-bottom-5">
               <div className="space-y-6">
                 <div className="inline-block px-8 py-2 bg-yellow-400 text-black font-black rounded-full text-lg uppercase tracking-widest">
-                  ROUND {currentIndex + 1}
+                  第 {currentIndex + 1} 題
                 </div>
                 <h2 className="text-5xl md:text-7xl font-black leading-tight drop-shadow-lg">{questions[currentIndex]?.text}</h2>
+                <div className="text-white/40 font-bold uppercase tracking-widest">
+                  已回答: {players.filter(p => p.lastAnswer).length} / {players.length}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-8 max-w-5xl mx-auto w-full">
                 {MEMBERS.map(m => (
@@ -273,7 +304,7 @@ export default function App() {
                 ))}
               </div>
               <div className="flex justify-center gap-6">
-                <button onClick={() => setGameState(GameState.LEADERBOARD)} className="bg-white/10 px-10 py-4 rounded-2xl font-black hover:bg-white/20 transition-all uppercase tracking-widest">排行榜</button>
+                <button onClick={() => setGameState(GameState.LEADERBOARD)} className="bg-white/10 px-10 py-4 rounded-2xl font-black hover:bg-white/20 transition-all uppercase tracking-widest">即時排行榜</button>
                 <button onClick={nextQuestion} className="bg-yellow-400 text-black px-12 py-4 rounded-2xl font-black hover:scale-110 transition-all shadow-2xl">下一題</button>
               </div>
             </div>
@@ -304,9 +335,9 @@ export default function App() {
                </div>
                <div className="flex justify-center pt-10">
                  {gameState === GameState.LEADERBOARD ? (
-                   <button onClick={nextQuestion} className="bg-yellow-400 text-black px-16 py-5 rounded-full font-black text-2xl hover:scale-110 transition-all">下一題</button>
+                   <button onClick={nextQuestion} className="bg-yellow-400 text-black px-16 py-5 rounded-full font-black text-2xl hover:scale-110 transition-all shadow-2xl">進入下一輪</button>
                  ) : (
-                   <button onClick={() => window.location.reload()} className="bg-white/10 px-12 py-4 rounded-full font-black text-sm hover:bg-white/20">重新開始</button>
+                   <button onClick={() => window.location.reload()} className="bg-white/10 px-12 py-4 rounded-full font-black text-sm hover:bg-white/20">重新開始遊戲</button>
                  )}
                </div>
             </div>
@@ -322,19 +353,8 @@ export default function App() {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-zinc-950 text-center space-y-6">
           <div className="w-16 h-16 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(255,240,0,0.5)]" />
-          <h2 className="text-2xl font-black bigbang-yellow animate-pulse">連線至母體投影中...</h2>
-          <p className="text-white/20 text-xs font-bold tracking-widest">ESTABLISHING V.I.P SECURE CONNECTION</p>
-        </div>
-      );
-    }
-
-    if (peerStatus === 'ERROR') {
-      return (
-        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-zinc-950 text-center space-y-6">
-          <div className="text-6xl text-red-500">❌</div>
-          <h2 className="text-2xl font-black text-red-500">連線失敗</h2>
-          <p className="text-white/60">母體可能已關閉或網路不穩定</p>
-          <button onClick={() => window.location.reload()} className="bg-white/10 px-8 py-3 rounded-xl font-bold">重新整理</button>
+          <h2 className="text-2xl font-black bigbang-yellow animate-pulse">連線中...</h2>
+          <p className="text-white/20 text-xs font-bold tracking-widest uppercase">VIP Secure Connection</p>
         </div>
       );
     }
@@ -359,12 +379,12 @@ export default function App() {
               required
               maxLength={10}
               autoComplete="off"
-              placeholder="YOUR NAME..."
+              placeholder="名稱..."
               className="w-full bg-white/5 border-2 border-white/10 p-6 rounded-3xl text-3xl font-black focus:border-yellow-400 outline-none transition-all text-center uppercase tracking-widest text-white"
               autoFocus
             />
             <button className="w-full bg-yellow-400 text-black font-black py-6 rounded-3xl text-2xl shadow-2xl active:scale-95 transition-all">
-              進入會場
+              進入大廳
             </button>
           </form>
         </div>
@@ -375,27 +395,27 @@ export default function App() {
       <div className="min-h-screen p-4 flex flex-col bg-zinc-950 max-w-lg mx-auto">
         <header className="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-yellow-400 flex items-center justify-center text-black font-black text-2xl italic shadow-lg">V</div>
-            <div className="font-black text-2xl uppercase text-white">{currentPlayer.name}</div>
+            <div className="w-10 h-10 rounded-xl bg-yellow-400 flex items-center justify-center text-black font-black text-xl italic">V</div>
+            <div className="font-black text-xl uppercase text-white truncate max-w-[120px]">{currentPlayer.name}</div>
           </div>
           <div className="text-right">
-            <div className="bigbang-yellow font-black text-3xl leading-none">{currentPlayer.score}</div>
-            <div className="text-[10px] text-white/40 font-bold uppercase tracking-tighter">POINTS</div>
+            <div className="bigbang-yellow font-black text-2xl leading-none">{currentPlayer.score}</div>
+            <div className="text-[10px] text-white/40 font-bold uppercase">POINTS</div>
           </div>
         </header>
 
         <div className="flex-1 flex flex-col justify-center">
           {gameState === GameState.JOINING ? (
-            <div className="text-center space-y-8 animate-pulse">
+            <div className="text-center space-y-8">
               <div className="text-8xl drop-shadow-[0_0_20px_rgba(255,240,0,0.5)]">👑</div>
-              <h2 className="text-3xl font-black uppercase text-white">等待母體開場</h2>
-              <p className="text-white/20 text-xs font-bold tracking-[0.3em]">YOU ARE CONNECTED</p>
+              <h2 className="text-3xl font-black uppercase text-white animate-pulse">連線成功！</h2>
+              <p className="text-white/40 text-sm">請看大螢幕，等待母體啟動遊戲...</p>
             </div>
           ) : gameState === GameState.QUESTION ? (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-5 duration-500">
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5 duration-500">
                <div className="text-center space-y-2 bg-white/5 p-6 rounded-[2rem] border border-white/10">
-                  <div className="text-yellow-400 font-black text-xs uppercase tracking-widest">ROUND {currentIndex + 1}</div>
-                  <h3 className="text-2xl font-black leading-tight text-white">{questions[currentIndex]?.text}</h3>
+                  <div className="text-yellow-400 font-black text-xs uppercase tracking-widest">第 {currentIndex + 1} 題</div>
+                  <h3 className="text-xl font-bold leading-tight text-white">{questions[currentIndex]?.text}</h3>
                </div>
                <div className="grid grid-cols-1 gap-4">
                 {shuffledMembers.map(m => (
@@ -403,9 +423,9 @@ export default function App() {
                     key={m.id}
                     onClick={() => submitAnswer(m.stageName)}
                     disabled={!!currentPlayer.lastAnswer}
-                    className={`p-6 rounded-[2rem] text-3xl font-black transition-all transform active:scale-95 border-4 ${
+                    className={`p-6 rounded-[2rem] text-2xl font-black transition-all transform active:scale-95 border-4 ${
                       currentPlayer.lastAnswer === m.stageName 
-                        ? 'bg-yellow-400 text-black border-yellow-400 shadow-2xl scale-105'
+                        ? 'bg-yellow-400 text-black border-yellow-400 shadow-[0_0_30px_rgba(255,240,0,0.4)] scale-105'
                         : 'bg-white/5 text-white border-white/5'
                     } disabled:opacity-50 uppercase tracking-widest`}
                   >
@@ -414,21 +434,29 @@ export default function App() {
                 ))}
                </div>
                {currentPlayer.lastAnswer && (
-                 <p className="text-yellow-400 font-black text-center text-xl animate-bounce">答案已傳送！</p>
+                 <div className="text-center space-y-2 animate-bounce">
+                   <p className="text-yellow-400 font-black text-xl">答案已傳送到母體！</p>
+                   <p className="text-white/20 text-xs font-bold uppercase">等待其他 VIP 或下一題...</p>
+                 </div>
                )}
             </div>
           ) : (
             <div className="space-y-8 animate-in fade-in">
-              <h2 className="text-4xl font-black text-center bigbang-yellow italic uppercase tracking-tighter">當前戰況</h2>
+              <h2 className="text-3xl font-black text-center bigbang-yellow italic uppercase tracking-tighter">
+                {gameState === GameState.FINISHED ? '比賽結束！' : '排行榜'}
+              </h2>
               <div className="space-y-3">
                  {[...players].sort((a,b) => b.score - a.score).map((p, idx) => (
-                   <div key={p.id} className={`glass-card p-4 rounded-2xl flex justify-between items-center ${p.id === currentPlayer.id ? 'border-yellow-400/50 bg-yellow-400/5' : ''}`}>
-                      <span className="font-black text-white/40">{idx+1}</span>
-                      <span className="font-bold text-white uppercase">{p.name} {p.id === currentPlayer.id ? '(YOU)' : ''}</span>
+                   <div key={p.id} className={`glass-card p-4 rounded-2xl flex justify-between items-center ${p.id === currentPlayer.id ? 'border-yellow-400/50 bg-yellow-400/10' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <span className="font-black text-white/20">{idx+1}</span>
+                        <span className="font-bold text-white uppercase text-sm">{p.name} {p.id === currentPlayer.id ? '(你)' : ''}</span>
+                      </div>
                       <span className="font-mono text-yellow-400 font-black">{p.score}</span>
                    </div>
                  ))}
               </div>
+              <p className="text-white/40 text-center text-xs animate-pulse">母體正在操作中，請稍候...</p>
             </div>
           )}
         </div>
