@@ -1,0 +1,7 @@
+{
+  "name": "BIGBANG VIP Trivia Challenge",
+  "description": "An interactive trivia game about BIGBANG (GD, T.O.P, Taeyang, Daesung) with a host-controlled flow and live leaderboard.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
