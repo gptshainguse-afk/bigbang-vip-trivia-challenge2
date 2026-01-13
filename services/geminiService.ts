@@ -19,7 +19,7 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = []): Pr
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       contents: "請為我生成 10 題新的 BIGBANG 問答題。",
       config: {
         systemInstruction,
