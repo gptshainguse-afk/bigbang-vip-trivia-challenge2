@@ -10,7 +10,8 @@ export enum GameState {
   JOINING = 'JOINING',
   QUESTION = 'QUESTION',
   LEADERBOARD = 'LEADERBOARD',
-  FINISHED = 'FINISHED'
+  FINISHED = 'FINISHED',
+  CHALLENGE_INVITE = 'CHALLENGE_INVITE'
 }
 
 export interface BigBangMember {
@@ -33,10 +34,12 @@ export interface Player {
   score: number;
   lastAnswer?: string;
   isCorrect?: boolean;
+  isInvited?: boolean;
+  hasAccepted?: boolean;
 }
 
 export interface GameSyncMessage {
-  type: 'SYNC_STATE';
+  type: 'SYNC_STATE' | 'CHALLENGE_RECEIVED' | 'CHALLENGE_ACCEPTED';
   gameState: GameState;
   currentQuestionIndex: number;
   players: Player[];
