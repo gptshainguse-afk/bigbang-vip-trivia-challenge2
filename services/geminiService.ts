@@ -1,26 +1,32 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
 export const generateBigBangQuestions = async (usedQuestions: string[] = []): Promise<Question[]> => {
-  // 遵循規範：在調用前才初始化，並使用指定的 API Key 獲取方式
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // 獲取 API KEY 的安全方式
+  const apiKey = process.env.API_KEY;
   
-  const systemInstruction = `你是一位資深的 BIGBANG 粉絲 (V.I.P)。
+  if (!apiKey) {
+    console.error("Critical Error: process.env.API_KEY is undefined.");
+    return getFallbackQuestions();
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  
+  const systemInstruction = `你是一位超級 BIGBANG 專家 (V.I.P)。
   請生成 10 題關於 G-Dragon, T.O.P, Taeyang, Daesung 的繁體中文有趣問答。
   
-  核心規則：
-  1. 答案必須且只能是這四人之一： "G-Dragon", "T.O.P", "Taeyang", "Daesung"。
-  2. 絕對禁止出現「勝利 (Seungri)」或任何與他相關的內容。
-  3. 題目類型：綜藝名場面、成員習慣、時尚梗、練習生趣事、舞台趣聞。
-  4. 絕對避開重複以下題目：${usedQuestions.join('、')}。
-  5. 每一題必須附帶一個 short 'funFact'。
-  6. 輸出格式必須是純 JSON。`;
+  核心準則：
+  1. 正確答案必須是以下四個字串之一（精確匹配）："G-Dragon", "T.O.P", "Taeyang", "Daesung"。
+  2. 絕對不准提到「勝利 (Seungri)」。
+  3. 題目類型：綜藝梗（如《家族誕生》、《無限挑戰》）、經典舞台失誤、成員間的私下趣聞、標誌性時尚。
+  4. 絕對不可重複出現以下題目：${usedQuestions.join('、')}。
+  5. 每一題都要有有趣的「funFact」。
+  6. 輸出格式必須是純 JSON 陣列。`;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: "請為我生成 10 題新的 BIGBANG 問答題。",
+      model: "gemini-3-flash-preview",
+      contents: "請生成 10 題全新的 BIGBANG 鐵粉問答。",
       config: {
         systemInstruction,
         responseMimeType: "application/json",
@@ -31,7 +37,7 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = []): Pr
             properties: {
               id: { type: Type.INTEGER },
               text: { type: Type.STRING },
-              correctAnswer: { type: Type.STRING, description: "必須精確為 G-Dragon, T.O.P, Taeyang 或 Daesung" },
+              correctAnswer: { type: Type.STRING },
               funFact: { type: Type.STRING }
             },
             required: ["id", "text", "correctAnswer", "funFact"]
@@ -41,22 +47,25 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = []): Pr
     });
 
     const result = JSON.parse(response.text || '[]');
-    if (result.length === 0) throw new Error("API 回傳為空");
+    if (result.length === 0) throw new Error("API return empty results");
     return result;
   } catch (error) {
-    console.error("Gemini API 發生錯誤:", error);
-    // 備用高品質中文題目
-    return [
-      { id: 101, text: "在《家族誕生》中，哪位成員因為不敢抓魚而被封為「阿呆阿瓜」的一員？", correctAnswer: "Daesung", funFact: "大聲在該節目中與劉在錫的化學反應是收視保證！" },
-      { id: 102, text: "誰曾在 MAMA 頒獎典禮上以神似「玉子燒」或「長壽司」的亮黃色髮型引起全球討論？", correctAnswer: "G-Dragon", funFact: "GD 的髮型演變史一直是大眾關注焦點。" },
-      { id: 103, text: "哪位成員以喜愛紅酒與收集名貴椅子（如 Charlotte Perriand）聞名，家裡像博物館？", correctAnswer: "T.O.P", funFact: "他對椅子和現代藝術的熱情是偶像界第一。" },
-      { id: 104, text: "經典抒情歌《眼、鼻、嘴》是哪位成員在 2014 年寫給愛人閔孝琳的表白歌曲？", correctAnswer: "Taeyang", funFact: "這首歌發行時在各國排行榜蟬聯多週冠軍。" },
-      { id: 105, text: "哪位成員在練習生時期，因為太陽太餓而一起去便利商店買麵包吃，結果被社長抓包？", correctAnswer: "G-Dragon", funFact: "兩人當初為了這顆麵包差點被開除練習生資格。" },
-      { id: 106, text: "誰在 2024 年開設了 YouTube 談話節目《家大聲》，並邀集了各路圈內好友來聊天？", correctAnswer: "Daesung", funFact: "該頻道目前是許多 V.I.P 獲取成員近況的重要管道。" },
-      { id: 107, text: "哪位成員的低沉嗓音被稱為「低音砲」，在歌曲《Doom Dada》中展現了極致的快嘴饒舌？", correctAnswer: "T.O.P", funFact: "他的聲線是 BIGBANG 音樂中不可或缺的重金屬元素。" },
-      { id: 108, text: "誰是 BIGBANG 中公認的「舞蹈機器」，並在 2023 年與 BTS 的 Jimin 合作了單曲《VIBE》？", correctAnswer: "Taeyang", funFact: "太陽的律動感在韓流圈被視為教科書等級。" },
-      { id: 109, text: "在《無限挑戰》歌謠祭中，哪位成員曾與鄭亨敦組成「形龍敦野」並產生莫名的 CP 感？", correctAnswer: "G-Dragon", funFact: "當時兩人的互動被選為年度最佳情侶之一。" },
-      { id: 110, text: "哪位成員在日本發展時以藝名「D-Lite」活動，並發行過多張充滿活力的 Trot 專輯？", correctAnswer: "Daesung", funFact: "大聲在日本展現了極強的親和力與唱功。" }
-    ];
+    console.warn("Gemini API Error, using high-quality fallback questions:", error);
+    return getFallbackQuestions();
   }
 };
+
+function getFallbackQuestions(): Question[] {
+  return [
+    { id: Date.now() + 1, text: "在《無限挑戰》歌謠祭中，GD 曾與哪位大叔前輩組成「GG」組合並演唱《花心》？", correctAnswer: "G-Dragon", funFact: "當時朴明秀對 GD 的「執著」讓全韓國觀眾爆笑。" },
+    { id: Date.now() + 2, text: "哪位成員曾在日本以「D-Lite」名義發行演歌 (Trot) 專輯《看我，貴順》？", correctAnswer: "Daesung", funFact: "這首歌是由 GD 親自作詞作曲送給大聲的。" },
+    { id: Date.now() + 3, text: "哪位成員因為太愛收集椅子，甚至被成員爆料家裡客廳連坐的位置都沒有？", correctAnswer: "T.O.P", funFact: "他是專業的設計師椅收藏家，收藏量驚人。" },
+    { id: Date.now() + 4, text: "太陽的經典歌曲《眼、鼻、嘴》MV 中，背景那張巨大的照片是哪位女明星？", correctAnswer: "Taeyang", funFact: "那是他的初戀及現任妻子閔孝琳。" },
+    { id: Date.now() + 5, text: "GD 曾在哪個頒獎典禮上以「壽司頭」髮型亮相，成為時尚史上的名場面？", correctAnswer: "G-Dragon", funFact: "那個造型靈感來自玉子燒壽司。" },
+    { id: Date.now() + 6, text: "哪位成員被稱為「BIGBANG 的道德標竿」，出道多年幾乎沒有任何負面新聞？", correctAnswer: "Taeyang", funFact: "他是韓國演藝圈公認的自律代表。" },
+    { id: Date.now() + 7, text: "在練習生時期，哪兩位成員因為太餓偷偷去便利商店買麵包吃，差點被社長開除？", correctAnswer: "G-Dragon", funFact: "這兩位就是竹馬好友 GD 和太陽。" },
+    { id: Date.now() + 8, text: "哪位成員在 2024 年開設了 YouTube 頻道《家大聲》，專門邀請朋友到家裡作客？", correctAnswer: "Daesung", funFact: "太陽和 GD 都曾出現在該節目中支持他。" },
+    { id: Date.now() + 9, text: "哪位成員擁有低沉的嗓音，並在電影《向著炮火》中擔任主演獲得最佳新人獎？", correctAnswer: "T.O.P", funFact: "他是 BIGBANG 中第一位獲得電影演技大獎的成員。" },
+    { id: Date.now() + 10, text: "誰在《家族誕生》中展現了抓魚的恐懼，被封為「阿呆阿瓜」的一員？", correctAnswer: "Daesung", funFact: "他與劉在錫的默契讓該節目成為當年的綜藝之王。" }
+  ];
+}
