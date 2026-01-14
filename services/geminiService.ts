@@ -1,25 +1,31 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
-export const generateBigBangQuestions = async (usedQuestions: string[] = []): Promise<Question[]> => {
-  // 遵循規範：直接使用 process.env.API_KEY 初始化
-  // 系統會自動注入此變數，不應手動判斷 undefined 導致阻斷
+export const generateBigBangQuestions = async (usedQuestions: string[] = [], customKey?: string): Promise<Question[]> => {
+  // 優先順序：手動輸入的 Key > 環境變數中的 Key
+  const apiKey = customKey || process.env.API_KEY;
+
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    if (!apiKey) {
+      throw new Error("API Key is missing (neither custom nor env)");
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
     
     const systemInstruction = `你是一位資深的 BIGBANG 粉絲 (V.I.P)。
     請生成 10 題關於 G-Dragon, T.O.P, Taeyang, Daesung 的繁體中文問答題。
     
     規則：
     1. 正確答案只能是： "G-Dragon", "T.O.P", "Taeyang", "Daesung"。
-    2. 禁止提及「勝利 (Seungri)」。
-    3. 題目必須有趣，包含綜藝名場面、成員怪癖、經典時尚、或 2024 年後的最新活動。
-    4. 避開以下重複題目：${usedQuestions.join('、')}。
-    5. 必須返回 JSON 陣列格式。`;
+    2. 絕對禁止提到「勝利 (Seungri)」。
+    3. 題目包含綜藝、時尚、練習生時期、或 2024 年後的最新活動（如家大聲、VIBE）。
+    4. 避開重複：${usedQuestions.join('、')}。
+    5. 必須返回 JSON 格式。`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "請生成 10 題有趣的 BIGBANG V.I.P 專屬問答。",
+      contents: "請生成 10 題高品質的 BIGBANG 鐵粉問答。",
       config: {
         systemInstruction,
         responseMimeType: "application/json",
@@ -30,7 +36,7 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = []): Pr
             properties: {
               id: { type: Type.INTEGER },
               text: { type: Type.STRING },
-              correctAnswer: { type: Type.STRING, description: "必須精確為成員藝名" },
+              correctAnswer: { type: Type.STRING },
               funFact: { type: Type.STRING }
             },
             required: ["id", "text", "correctAnswer", "funFact"]
@@ -44,8 +50,7 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = []): Pr
     throw new Error("Empty AI result");
     
   } catch (error) {
-    console.error("Gemini API Error, fallback to static questions:", error);
-    // 備案：高品質靜態題目
+    console.error("Gemini API Error (Using Fallback):", error);
     return getFallbackQuestions();
   }
 };
