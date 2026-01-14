@@ -24,6 +24,14 @@ export default function App() {
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   const hostConnRef = useRef<DataConnection | null>(null);
 
+  // API KEY 設定相關
+  const [showSettings, setShowSettings] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('BB_CUSTOM_API_KEY') || '');
+
+  useEffect(() => {
+    localStorage.setItem('BB_CUSTOM_API_KEY', customApiKey);
+  }, [customApiKey]);
+
   // --- 連線邏輯 ---
 
   useEffect(() => {
@@ -76,7 +84,7 @@ export default function App() {
   const fetchNewQuestions = async () => {
     setIsSyncing(true);
     try {
-      const q = await generateBigBangQuestions(usedQuestionTexts.current);
+      const q = await generateBigBangQuestions(usedQuestionTexts.current, customApiKey);
       setQuestions(q);
       q.forEach(item => usedQuestionTexts.current.push(item.text));
       setCurrentIndex(-1);
@@ -100,7 +108,6 @@ export default function App() {
 
       conn.on('data', (data: any) => {
         if (data.type === 'SYNC_STATE') {
-          // 檢測是否進到下一題
           setCurrentIndex(prev => {
             if (data.currentQuestionIndex !== prev) {
               setShuffledMembers(shuffleArray(MEMBERS));
@@ -112,7 +119,6 @@ export default function App() {
           setPlayers(data.players);
           setQuestions(data.questions || []);
           
-          // 更新玩家自己的狀態與分數
           setCurrentPlayer(p => {
             if (!p) return null;
             const updatedFromHost = data.players.find((pl: Player) => pl.id === p.id);
@@ -145,28 +151,20 @@ export default function App() {
     connectionsRef.current.forEach(conn => sendSyncToConn(conn));
   }, [gameState, currentIndex, players, questions, sessionId]);
 
-  // 母體狀態一旦異動，立即廣播給所有玩家
   useEffect(() => {
     if (role === GameRole.HOST && peerStatus === 'CONNECTED') {
       broadcast();
     }
   }, [gameState, currentIndex, players, questions, role, peerStatus, broadcast]);
 
-  // --- 統計分數功能 ---
-
   const handlePlayerAnswer = (playerId: string, answer: string) => {
     setPlayers(prev => {
       return prev.map(p => {
         if (p.id === playerId) {
-          if (p.lastAnswer) return p; // 防止重複作答
-          
-          // 寬容比對：小寫、去空格、去特殊字元
+          if (p.lastAnswer) return p;
           const normCorrect = (questions[currentIndex]?.correctAnswer || "").toLowerCase().replace(/[^a-z]/g, '');
           const normPlayer = answer.toLowerCase().replace(/[^a-z]/g, '');
           const isCorrect = normPlayer === normCorrect;
-          
-          console.log(`[Host] Player ${p.name} answered: ${answer}. Correct: ${isCorrect}`);
-          
           return { 
             ...p, 
             lastAnswer: answer, 
@@ -181,7 +179,6 @@ export default function App() {
 
   const nextQuestion = () => {
     if (currentIndex < questions.length - 1) {
-      // 清除上一題所有人的作答狀態
       setPlayers(prev => prev.map(p => ({ ...p, lastAnswer: undefined, isCorrect: undefined })));
       setCurrentIndex(prev => prev + 1);
       setGameState(GameState.QUESTION);
@@ -192,10 +189,7 @@ export default function App() {
 
   const submitAnswer = (answer: string) => {
     if (!currentPlayer || currentPlayer.lastAnswer || gameState !== GameState.QUESTION) return;
-    
-    // 手機端先顯示「處理中」狀態
     setCurrentPlayer(prev => prev ? { ...prev, lastAnswer: answer } : null);
-    
     if (hostConnRef.current?.open) {
       hostConnRef.current.send({ 
         type: 'PLAYER_ANSWER', 
@@ -219,7 +213,44 @@ export default function App() {
     return url.toString();
   }, [sessionId]);
 
-  // --- UI ---
+  // --- UI 組件 ---
+
+  const SettingsModal = () => (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="glass-card w-full max-w-md p-10 rounded-[3rem] border border-yellow-400/30 shadow-[0_0_50px_rgba(255,240,0,0.2)]">
+        <h3 className="text-3xl font-black bigbang-yellow italic tracking-tighter mb-6">VIP SYSTEM SETTINGS</h3>
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-white/40 uppercase tracking-widest">Gemini API Key</label>
+            <input 
+              type="password"
+              value={customApiKey}
+              onChange={(e) => setCustomApiKey(e.target.value)}
+              placeholder="Paste your API key here..."
+              className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-white outline-none focus:border-yellow-400 transition-all font-mono"
+            />
+          </div>
+          <p className="text-xs text-white/30 leading-relaxed">
+            如果母體無法從環境變數取得金鑰，請在此手動輸入。金鑰將僅儲存在您的瀏覽器本地。
+          </p>
+          <div className="flex gap-4 pt-4">
+            <button 
+              onClick={() => setShowSettings(false)}
+              className="flex-1 bg-yellow-400 text-black font-black py-4 rounded-2xl hover:bg-yellow-300 transition-all uppercase tracking-widest"
+            >
+              SAVE & CLOSE
+            </button>
+            <button 
+              onClick={() => { setCustomApiKey(''); }}
+              className="px-6 py-4 rounded-2xl border border-white/10 font-bold text-white/40 hover:text-white transition-all uppercase text-xs"
+            >
+              CLEAR
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   if (role === GameRole.LOBBY) {
     return (
@@ -234,7 +265,7 @@ export default function App() {
             disabled={isSyncing}
             className="w-full max-w-sm bg-yellow-400 text-black font-black py-8 rounded-[3rem] hover:scale-110 active:scale-95 transition-all shadow-2xl text-3xl uppercase tracking-widest disabled:opacity-50"
           >
-            {isSyncing ? '正在同步 VIP 資料...' : '啟動 VIP ARENA'}
+            {isSyncing ? '正在初始化...' : '啟動 VIP ARENA'}
           </button>
         </div>
       </div>
@@ -256,6 +287,7 @@ export default function App() {
         </header>
 
         <main className="flex-1 flex flex-col justify-center overflow-hidden">
+          {/* 渲染母體原本的各種 State UI */}
           {gameState === GameState.JOINING && (
             <div className="text-center space-y-10 animate-in zoom-in">
               <h2 className="text-7xl font-black uppercase tracking-tight">準備入場</h2>
@@ -331,6 +363,18 @@ export default function App() {
             </div>
           )}
         </main>
+
+        {/* 齒輪按鈕與彈窗 */}
+        <button 
+          onClick={() => setShowSettings(true)}
+          className="fixed bottom-10 right-10 z-50 p-4 bg-yellow-400 rounded-full shadow-2xl hover:rotate-90 transition-all duration-500 group"
+        >
+          <svg className="w-8 h-8 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+        {showSettings && <SettingsModal />}
       </div>
     );
   }
