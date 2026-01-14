@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GameRole, GameState, Player, Question } from './types';
 import { generateBigBangQuestions } from './services/geminiService';
@@ -24,7 +23,7 @@ export default function App() {
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   const hostConnRef = useRef<DataConnection | null>(null);
 
-  // --- 連線邏輯 ---
+  // --- 連線核心 ---
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -51,15 +50,8 @@ export default function App() {
     peer.on('connection', (conn) => {
       conn.on('open', () => {
         connectionsRef.current.set(conn.peer, conn);
-        // 初次同步目前的完整狀態
-        conn.send({
-          type: 'SYNC_STATE',
-          gameState,
-          currentQuestionIndex: currentIndex,
-          players,
-          questions,
-          sessionId: sid
-        });
+        // 主動發送當前狀態
+        sendSyncMessage(conn);
       });
 
       conn.on('data', (data: any) => {
@@ -83,11 +75,16 @@ export default function App() {
 
   const fetchNewQuestions = async () => {
     setIsSyncing(true);
-    const q = await generateBigBangQuestions(usedQuestionTexts.current);
-    setQuestions(q);
-    q.forEach(item => usedQuestionTexts.current.push(item.text));
-    setCurrentIndex(-1);
-    setIsSyncing(false);
+    try {
+      const q = await generateBigBangQuestions(usedQuestionTexts.current);
+      setQuestions(q);
+      q.forEach(item => usedQuestionTexts.current.push(item.text));
+      setCurrentIndex(-1);
+    } catch (e) {
+      console.error("Fetch questions failed", e);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const setupPlayerPeer = (targetSid: string) => {
@@ -103,42 +100,30 @@ export default function App() {
 
       conn.on('data', (data: any) => {
         if (data.type === 'SYNC_STATE') {
-          // 偵測題號是否改變，若是則重置本地狀態
-          setCurrentIndex(prevIndex => {
-            if (data.currentQuestionIndex !== prevIndex) {
-              setCurrentPlayer(p => p ? { ...p, lastAnswer: undefined, isCorrect: undefined } : null);
-              setShuffledMembers(shuffleArray(MEMBERS));
-            }
-            return data.currentQuestionIndex;
-          });
+          // 偵測下一題
+          if (data.currentQuestionIndex !== currentIndex) {
+            setShuffledMembers(shuffleArray(MEMBERS));
+          }
           
           setGameState(data.gameState);
+          setCurrentIndex(data.currentQuestionIndex);
           setPlayers(data.players);
           setQuestions(data.questions || []);
           
-          // 更新玩家自己的本地統計數據
+          // 更新本地玩家分數
           setCurrentPlayer(p => {
             if (!p) return null;
-            const updated = data.players.find((player: Player) => player.id === p.id);
-            return updated ? { ...p, score: updated.score, lastAnswer: updated.lastAnswer } : p;
+            const match = data.players.find((pl: Player) => pl.id === p.id);
+            return match ? { ...p, score: match.score, lastAnswer: match.lastAnswer, isCorrect: match.isCorrect } : p;
           });
         }
       });
-
-      conn.on('close', () => setPeerStatus('ERROR'));
     });
   };
 
-  const broadcast = useCallback((data: any) => {
-    connectionsRef.current.forEach(conn => {
-      if (conn.open) conn.send(data);
-    });
-  }, []);
-
-  // 母體狀態改變時，立即廣播給所有人
-  useEffect(() => {
-    if (role === GameRole.HOST && peerStatus === 'CONNECTED') {
-      broadcast({
+  const sendSyncMessage = (conn: DataConnection) => {
+    if (conn.open) {
+      conn.send({
         type: 'SYNC_STATE',
         gameState,
         currentQuestionIndex: currentIndex,
@@ -147,19 +132,30 @@ export default function App() {
         sessionId
       });
     }
-  }, [gameState, currentIndex, players, questions, role, peerStatus, broadcast, sessionId]);
+  };
 
-  // --- 遊戲邏輯 ---
+  const broadcast = useCallback(() => {
+    connectionsRef.current.forEach(conn => sendSyncMessage(conn));
+  }, [gameState, currentIndex, players, questions, sessionId]);
+
+  // 母體狀態異動，即時同步
+  useEffect(() => {
+    if (role === GameRole.HOST && peerStatus === 'CONNECTED') {
+      broadcast();
+    }
+  }, [gameState, currentIndex, players, questions, role, peerStatus, broadcast]);
+
+  // --- 核心計分邏輯 ---
 
   const handlePlayerAnswer = (playerId: string, answer: string) => {
     setPlayers(prev => {
       const updated = prev.map(p => {
         if (p.id === playerId) {
-          if (p.lastAnswer) return p; // 防止重複作答
+          if (p.lastAnswer) return p; // 防止重複計分
           
-          const correctAns = questions[currentIndex]?.correctAnswer?.trim() || "";
-          // 規範化比對邏輯
-          const isCorrect = answer.replace(/\s/g, '').toLowerCase() === correctAns.replace(/\s/g, '').toLowerCase();
+          const correctStr = (questions[currentIndex]?.correctAnswer || "").toLowerCase().replace(/[^a-z]/g, '');
+          const playerStr = answer.toLowerCase().replace(/[^a-z]/g, '');
+          const isCorrect = playerStr === correctStr;
           
           return { 
             ...p, 
@@ -176,7 +172,6 @@ export default function App() {
 
   const nextQuestion = () => {
     if (currentIndex < questions.length - 1) {
-      // 下一題前，清除所有人的當題作答紀錄
       setPlayers(prev => prev.map(p => ({ ...p, lastAnswer: undefined, isCorrect: undefined })));
       setCurrentIndex(prev => prev + 1);
       setGameState(GameState.QUESTION);
@@ -188,7 +183,7 @@ export default function App() {
   const submitAnswer = (answer: string) => {
     if (!currentPlayer || currentPlayer.lastAnswer || gameState !== GameState.QUESTION) return;
     
-    // 手機端先標註為已答
+    // 手機端先本地標註，提升反應速度
     setCurrentPlayer(prev => prev ? { ...prev, lastAnswer: answer } : null);
     
     if (hostConnRef.current?.open) {
@@ -214,108 +209,117 @@ export default function App() {
     return url.toString();
   }, [sessionId]);
 
-  // --- UI 組件 ---
+  // --- UI ---
 
   if (role === GameRole.LOBBY) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-12 bg-black">
-        <div className="relative">
-          <h1 className="text-8xl font-black italic bigbang-yellow tracking-tighter drop-shadow-[0_0_30px_rgba(255,240,0,0.5)]">BIGBANG</h1>
-          <div className="absolute -top-6 -right-6 rotate-12">{CROWN_SVG(48, COLORS.GOLD)}</div>
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-black">
+        <div className="text-center space-y-12">
+          <div className="relative inline-block">
+            <h1 className="text-8xl font-black italic bigbang-yellow tracking-tighter drop-shadow-[0_0_40px_rgba(255,240,0,0.6)] animate-pulse">BIGBANG</h1>
+            <div className="absolute -top-10 -right-10 rotate-12">{CROWN_SVG(64, COLORS.GOLD)}</div>
+          </div>
+          <button 
+            onClick={setupHostPeer}
+            disabled={isSyncing}
+            className="w-full max-w-sm bg-yellow-400 text-black font-black py-8 rounded-[2.5rem] hover:scale-105 active:scale-95 transition-all shadow-[0_20px_50px_rgba(255,240,0,0.3)] text-3xl uppercase tracking-widest disabled:opacity-50"
+          >
+            {isSyncing ? 'AI 準備題目中...' : '啟動 VIP 母體'}
+          </button>
         </div>
-        <button 
-          onClick={setupHostPeer}
-          disabled={isSyncing}
-          className="w-full max-w-sm bg-yellow-400 text-black font-black py-6 rounded-2xl hover:bg-yellow-300 transition-all shadow-xl text-2xl uppercase tracking-widest disabled:opacity-50"
-        >
-          {isSyncing ? '正在生成 10 題問答...' : '啟動投影幕'}
-        </button>
       </div>
     );
   }
 
   if (role === GameRole.HOST) {
     return (
-      <div className="min-h-screen p-8 max-w-6xl mx-auto flex flex-col bg-black overflow-hidden">
-        <header className="flex justify-between items-end mb-8 border-b-2 border-yellow-400/20 pb-4">
+      <div className="min-h-screen p-8 max-w-6xl mx-auto flex flex-col bg-black">
+        <header className="flex justify-between items-end mb-10 border-b-2 border-yellow-400/20 pb-5">
           <div>
-            <h1 className="text-4xl font-black italic bigbang-yellow tracking-tighter">BIGBANG MOTHER</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <div className={`w-2 h-2 rounded-full ${peerStatus === 'CONNECTED' ? 'bg-green-500 shadow-[0_0_5px_green]' : 'bg-red-500 animate-pulse'}`} />
-              <span className="text-[10px] text-white/40 font-mono tracking-widest">SESSION: {sessionId}</span>
+            <h1 className="text-5xl font-black italic bigbang-yellow tracking-tighter">VIP MOTHERBOARD</h1>
+            <div className="flex items-center gap-3 mt-2">
+              <div className={`w-3 h-3 rounded-full ${peerStatus === 'CONNECTED' ? 'bg-green-500 shadow-[0_0_10px_green]' : 'bg-red-500'}`} />
+              <span className="text-xs text-white/40 font-mono">ROOM ID: {sessionId}</span>
             </div>
           </div>
-          <div className="text-right text-yellow-400 font-black text-xl">VIPs: {players.length}</div>
+          <div className="text-right">
+            <div className="text-yellow-400 font-black text-3xl">ONLINE VIPs: {players.length}</div>
+          </div>
         </header>
 
-        <main className="flex-1 flex flex-col justify-center">
+        <main className="flex-1 flex flex-col justify-center overflow-hidden">
           {gameState === GameState.JOINING && (
-            <div className="text-center space-y-8 animate-in zoom-in duration-500">
-              <h2 className="text-5xl font-black uppercase tracking-tight">掃描 QR CODE 加入 VIP ARENA</h2>
-              <div className="bg-white p-4 rounded-3xl inline-block shadow-[0_0_80px_rgba(255,240,0,0.1)] border-4 border-yellow-400">
-                <QRCode value={playerJoinUrl} size={280} />
+            <div className="text-center space-y-10 animate-in zoom-in duration-500">
+              <h2 className="text-6xl font-black uppercase tracking-tight mb-4">掃描 QR CODE 加入戰場</h2>
+              <div className="bg-white p-6 rounded-[3rem] inline-block shadow-[0_0_100px_rgba(255,240,0,0.2)] border-8 border-yellow-400">
+                <QRCode value={playerJoinUrl} size={300} />
               </div>
-              <div className="flex flex-wrap justify-center gap-3 max-w-2xl mx-auto">
+              <div className="flex flex-wrap justify-center gap-4 max-w-4xl mx-auto">
                 {players.map(p => (
-                  <div key={p.id} className="bg-yellow-400 text-black px-5 py-2 rounded-full font-black animate-bounce shadow-lg">{p.name}</div>
+                  <div key={p.id} className="bg-yellow-400 text-black px-6 py-2 rounded-full font-black text-xl animate-bounce shadow-xl">{p.name}</div>
                 ))}
               </div>
-              <button onClick={nextQuestion} disabled={players.length === 0} className="bg-white text-black px-16 py-4 rounded-full font-black text-3xl hover:bg-yellow-400 transition-all disabled:opacity-20 shadow-2xl active:scale-95">
-                開始挑戰
+              <button onClick={nextQuestion} disabled={players.length === 0} className="bg-white text-black px-20 py-6 rounded-full font-black text-4xl hover:bg-yellow-400 transition-all disabled:opacity-20 shadow-2xl active:scale-95">
+                開始比賽
               </button>
             </div>
           )}
 
           {gameState === GameState.QUESTION && (
             <div className="text-center space-y-12 animate-in fade-in slide-in-from-bottom-5">
-              <div className="space-y-4">
-                <span className="bg-yellow-400 text-black px-8 py-2 rounded-full font-black text-lg uppercase tracking-widest italic">第 {currentIndex + 1} 題</span>
-                <h2 className="text-7xl font-black leading-tight drop-shadow-xl">{questions[currentIndex]?.text}</h2>
-                <p className="text-white/40 font-bold text-xl uppercase tracking-widest">已作答: {players.filter(p => p.lastAnswer).length} / {players.length}</p>
+              <div className="space-y-6">
+                <span className="bg-yellow-400 text-black px-10 py-2 rounded-full font-black text-xl uppercase italic shadow-lg">第 {currentIndex + 1} 題 / 共 {questions.length} 題</span>
+                <h2 className="text-7xl font-black leading-tight drop-shadow-2xl max-w-5xl mx-auto">{questions[currentIndex]?.text}</h2>
+                <div className="flex justify-center items-center gap-8 text-white/40 font-bold text-2xl uppercase tracking-[0.3em]">
+                  <span>已完成作答:</span>
+                  <span className="text-yellow-400 text-4xl">{players.filter(p => p.lastAnswer).length}</span>
+                  <span>/</span>
+                  <span>{players.length}</span>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-8 max-w-5xl mx-auto">
                 {MEMBERS.map(m => (
-                  <div key={m.id} className="glass-card py-12 rounded-[2.5rem] border border-white/10 text-4xl font-black text-white/90 shadow-2xl">
+                  <div key={m.id} className="glass-card py-16 rounded-[3rem] border border-white/10 text-5xl font-black text-white/90 shadow-2xl hover:bg-white/10 transition-colors">
                     {m.stageName}
                   </div>
                 ))}
               </div>
-              <div className="flex justify-center gap-6">
-                <button onClick={() => setGameState(GameState.LEADERBOARD)} className="bg-white/10 px-10 py-4 rounded-2xl font-black hover:bg-white/20 transition-all uppercase tracking-widest">中場戰況</button>
-                <button onClick={nextQuestion} className="bg-yellow-400 text-black px-16 py-4 rounded-2xl font-black text-xl hover:scale-110 transition-all shadow-2xl">下一題</button>
+              <div className="flex justify-center gap-8 pt-6">
+                <button onClick={() => setGameState(GameState.LEADERBOARD)} className="bg-white/10 px-12 py-5 rounded-2xl font-black hover:bg-white/20 transition-all uppercase tracking-widest text-xl border border-white/10">查看目前排名</button>
+                <button onClick={nextQuestion} className="bg-yellow-400 text-black px-20 py-5 rounded-2xl font-black text-2xl hover:scale-110 transition-all shadow-2xl">公佈下一題</button>
               </div>
             </div>
           )}
 
           {(gameState === GameState.LEADERBOARD || gameState === GameState.FINISHED) && (
             <div className="space-y-10 animate-in fade-in duration-700">
-               <h2 className="text-7xl font-black text-center italic bigbang-yellow tracking-tighter uppercase mb-8">
-                 {gameState === GameState.FINISHED ? 'THE ULTIMATE VIP' : '當前排行榜'}
+               <h2 className="text-8xl font-black text-center italic bigbang-yellow tracking-tighter uppercase mb-12 drop-shadow-2xl">
+                 {gameState === GameState.FINISHED ? 'FINAL KINGS' : 'CURRENT STANDINGS'}
                </h2>
-               <div className="max-w-3xl mx-auto space-y-4">
+               <div className="max-w-4xl mx-auto space-y-4">
                   {[...players].sort((a,b) => b.score - a.score).map((p, idx) => (
-                    <div key={p.id} className="glass-card flex items-center justify-between p-6 rounded-3xl border border-white/5 shadow-lg">
-                      <div className="flex items-center gap-8">
-                        <span className="text-4xl font-black text-white/20 w-10">{idx+1}</span>
-                        <span className="text-2xl font-black tracking-tight">{p.name}</span>
+                    <div key={p.id} className="glass-card flex items-center justify-between p-8 rounded-[2.5rem] border border-white/10 shadow-2xl transition-all hover:scale-[1.02]">
+                      <div className="flex items-center gap-10">
+                        <span className="text-5xl font-black text-white/10 w-12">{idx+1}</span>
+                        <span className="text-3xl font-black tracking-tight">{p.name}</span>
                       </div>
-                      <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-8">
                         <div className="flex gap-2">
-                          {idx === 0 && Array(3).fill(0).map((_, i) => <span key={i}>{CROWN_SVG(36, COLORS.GOLD)}</span>)}
-                          {idx === 1 && Array(2).fill(0).map((_, i) => <span key={i}>{CROWN_SVG(30, COLORS.SILVER)}</span>)}
-                          {idx === 2 && Array(1).fill(0).map((_, i) => <span key={i}>{CROWN_SVG(26, COLORS.BRONZE)}</span>)}
+                          {idx === 0 && Array(3).fill(0).map((_, i) => <span key={i} className="animate-bounce">{CROWN_SVG(48, COLORS.GOLD)}</span>)}
+                          {idx === 1 && Array(2).fill(0).map((_, i) => <span key={i} className="animate-bounce">{CROWN_SVG(40, COLORS.SILVER)}</span>)}
+                          {idx === 2 && Array(1).fill(0).map((_, i) => <span key={i} className="animate-bounce">{CROWN_SVG(32, COLORS.BRONZE)}</span>)}
                         </div>
-                        <span className="text-4xl font-mono text-yellow-400 font-black">{p.score}</span>
+                        <span className="text-5xl font-mono text-yellow-400 font-black drop-shadow-[0_0_10px_rgba(255,240,0,0.5)]">{p.score}</span>
                       </div>
                     </div>
                   ))}
                </div>
-               <div className="flex justify-center gap-6 mt-8">
+               <div className="flex justify-center gap-8 mt-12">
                  {gameState === GameState.LEADERBOARD ? (
-                   <button onClick={nextQuestion} className="bg-yellow-400 text-black px-20 py-5 rounded-full font-black text-2xl hover:scale-110 transition-all shadow-2xl">進入下一題</button>
+                   <button onClick={nextQuestion} className="bg-yellow-400 text-black px-24 py-6 rounded-3xl font-black text-3xl hover:scale-110 transition-all shadow-2xl">下一題挑戰</button>
                  ) : (
-                   <button onClick={fetchNewQuestions} disabled={isSyncing} className="bg-white/10 px-12 py-5 rounded-full font-black text-lg hover:bg-white/20 uppercase tracking-widest">
-                     {isSyncing ? '生成中...' : '再戰 10 題 (不重複)'}
+                   <button onClick={fetchNewQuestions} disabled={isSyncing} className="bg-white/10 px-16 py-6 rounded-3xl font-black text-xl hover:bg-white/20 uppercase tracking-widest border border-white/10">
+                     {isSyncing ? '正在重啟戰場...' : '再戰 10 題 (題目不重複)'}
                    </button>
                  )}
                </div>
@@ -326,13 +330,13 @@ export default function App() {
     );
   }
 
-  // 參賽者手機端
+  // --- 玩家端 ---
   if (role === GameRole.PLAYER) {
     if (peerStatus === 'CONNECTING') return (
       <div className="min-h-screen flex items-center justify-center bg-black">
-        <div className="text-center space-y-6">
-          <div className="w-16 h-16 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto shadow-[0_0_15px_yellow]" />
-          <p className="bigbang-yellow font-black animate-pulse tracking-widest text-xl">VIP 專線連線中...</p>
+        <div className="text-center space-y-8">
+          <div className="w-20 h-20 border-8 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto shadow-[0_0_30px_yellow]" />
+          <p className="bigbang-yellow font-black animate-pulse tracking-widest text-2xl">VIP 專線連線中</p>
         </div>
       </div>
     );
@@ -343,84 +347,83 @@ export default function App() {
           e.preventDefault();
           const n = (e.currentTarget.elements.namedItem('playername') as HTMLInputElement).value;
           if (n) joinGame(n);
-        }} className="w-full max-w-xs space-y-10">
-          <div className="text-center space-y-2">
-            <h1 className="text-5xl font-black bigbang-yellow italic tracking-tighter">VIP JOIN</h1>
-            <p className="text-white/30 text-xs font-bold uppercase tracking-[0.2em]">Enter Your Stage Name</p>
+        }} className="w-full max-w-sm space-y-12">
+          <div className="text-center space-y-4">
+            <h1 className="text-6xl font-black bigbang-yellow italic tracking-tighter drop-shadow-lg">VIP JOIN</h1>
+            <p className="text-white/20 text-xs font-bold uppercase tracking-[0.4em]">ENTER STAGE NAME</p>
           </div>
-          <input name="playername" required maxLength={10} placeholder="輸入你的暱稱..." className="w-full bg-white/5 border-2 border-white/10 p-6 rounded-[2rem] text-3xl font-bold text-center text-white outline-none focus:border-yellow-400 transition-all shadow-inner" />
-          <button className="w-full bg-yellow-400 text-black font-black py-6 rounded-[2rem] text-2xl shadow-2xl active:scale-95 transition-all uppercase tracking-widest">入場</button>
+          <input name="playername" required maxLength={12} placeholder="你的暱稱..." className="w-full bg-white/5 border-2 border-white/10 p-8 rounded-[2.5rem] text-4xl font-black text-center text-white outline-none focus:border-yellow-400 transition-all shadow-inner uppercase" />
+          <button className="w-full bg-yellow-400 text-black font-black py-8 rounded-[2.5rem] text-3xl shadow-2xl active:scale-95 transition-all uppercase tracking-widest">進入戰場</button>
         </form>
       </div>
     );
 
     return (
       <div className="min-h-screen p-6 flex flex-col bg-zinc-950">
-        <header className="flex justify-between items-center mb-10 border-b border-white/10 pb-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-yellow-400 text-black font-black flex items-center justify-center rounded-xl italic">V</div>
-            <span className="font-black text-xl text-white truncate max-w-[150px] uppercase">{currentPlayer.name}</span>
+        <header className="flex justify-between items-center mb-12 border-b border-white/10 pb-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 bg-yellow-400 text-black font-black flex items-center justify-center rounded-2xl italic text-3xl shadow-lg">V</div>
+            <span className="font-black text-2xl text-white truncate max-w-[180px] uppercase tracking-tighter">{currentPlayer.name}</span>
           </div>
           <div className="text-right">
-            <span className="bigbang-yellow font-black text-3xl leading-none">{currentPlayer.score}</span>
-            <p className="text-[10px] text-white/30 font-bold uppercase tracking-tighter">Current Score</p>
+            <span className="bigbang-yellow font-black text-4xl leading-none">{currentPlayer.score}</span>
+            <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest">TOTAL SCORE</p>
           </div>
         </header>
 
         <div className="flex-1 flex flex-col justify-center">
           {gameState === GameState.JOINING ? (
-            <div className="text-center space-y-6">
-              <p className="text-8xl drop-shadow-[0_0_15px_rgba(255,240,0,0.3)]">👑</p>
-              <h2 className="text-3xl font-black text-white uppercase italic tracking-tighter animate-pulse">連線成功</h2>
-              <p className="text-white/40 font-bold text-sm">請盯緊大螢幕，等待母體啟動遊戲...</p>
+            <div className="text-center space-y-10">
+              <p className="text-9xl drop-shadow-[0_0_20px_rgba(255,240,0,0.4)]">👑</p>
+              <h2 className="text-4xl font-black text-white uppercase italic tracking-tighter animate-pulse">連線成功</h2>
+              <p className="text-white/40 font-bold text-lg">請緊盯大螢幕，遊戲即將開始！</p>
             </div>
           ) : gameState === GameState.QUESTION ? (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-5 duration-500">
-               <div className="text-center bg-white/5 p-6 rounded-[2rem] border border-white/10 shadow-lg">
-                  <p className="text-yellow-400 font-black text-sm mb-2 uppercase italic tracking-widest">Question {currentIndex + 1}</p>
-                  <h3 className="text-2xl font-bold text-white leading-tight">{questions[currentIndex]?.text}</h3>
+            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-5 duration-500">
+               <div className="text-center bg-white/5 p-8 rounded-[2.5rem] border border-white/10 shadow-2xl">
+                  <p className="text-yellow-400 font-black text-sm mb-4 uppercase italic tracking-widest">QUESTION {currentIndex + 1}</p>
+                  <h3 className="text-3xl font-bold text-white leading-snug">{questions[currentIndex]?.text}</h3>
                </div>
-               <div className="grid gap-4">
+               <div className="grid gap-5">
                 {shuffledMembers.map(m => (
                   <button
                     key={m.id}
                     onClick={() => submitAnswer(m.stageName)}
                     disabled={!!currentPlayer.lastAnswer}
-                    className={`p-6 rounded-[2rem] text-2xl font-black transition-all border-4 ${
+                    className={`p-8 rounded-[2.5rem] text-3xl font-black transition-all border-4 ${
                       currentPlayer.lastAnswer === m.stageName 
-                        ? 'bg-yellow-400 text-black border-yellow-400 scale-105 shadow-[0_0_30px_rgba(255,240,0,0.3)]'
+                        ? 'bg-yellow-400 text-black border-yellow-400 scale-105 shadow-[0_0_40px_rgba(255,240,0,0.4)]'
                         : 'bg-white/5 text-white border-white/10'
-                    } disabled:opacity-40 uppercase`}
+                    } disabled:opacity-50 uppercase tracking-tighter`}
                   >
                     {m.stageName}
                   </button>
                 ))}
                </div>
                {currentPlayer.lastAnswer && (
-                 <div className="text-center animate-bounce py-2">
-                   <p className="text-yellow-400 font-black text-xl uppercase italic">Answer Sent!</p>
-                   <p className="text-white/20 text-xs font-bold">等待母體公佈正確答案...</p>
+                 <div className="text-center py-4 space-y-2">
+                   <p className="text-yellow-400 font-black text-2xl uppercase italic animate-bounce tracking-widest">ANSWER RECORDED!</p>
+                   <p className="text-white/20 text-xs font-bold uppercase">正在與母體核對計分...</p>
                  </div>
                )}
             </div>
           ) : (
-            <div className="text-center space-y-8 animate-in fade-in">
-              <h2 className="text-4xl font-black bigbang-yellow italic uppercase tracking-tighter drop-shadow-lg">
-                {gameState === GameState.FINISHED ? 'FINAL RESULTS' : 'LIVE RANKING'}
+            <div className="text-center space-y-10 animate-in fade-in">
+              <h2 className="text-5xl font-black bigbang-yellow italic uppercase tracking-tighter drop-shadow-2xl">
+                {gameState === GameState.FINISHED ? 'FINAL RESULTS' : 'LIVE BOARD'}
               </h2>
-              <div className="space-y-3">
-                 {[...players].sort((a,b) => b.score - a.score).slice(0, 8).map((p, idx) => (
-                   <div key={p.id} className={`p-5 rounded-2xl flex justify-between items-center ${p.id === currentPlayer.id ? 'bg-yellow-400/20 border-2 border-yellow-400/40' : 'bg-white/5 border border-white/5'}`}>
-                      <div className="flex items-center gap-4">
-                        <span className="font-black text-white/20 text-xl">{idx+1}</span>
-                        <span className="font-bold text-white uppercase tracking-tight">{p.name} {p.id === currentPlayer.id ? '(YOU)' : ''}</span>
-                        {idx < 3 && <div className="flex gap-0.5">{Array(3-idx).fill(0).map((_, i) => <span key={i}>{CROWN_SVG(16)}</span>)}</div>}
+              <div className="space-y-4">
+                 {[...players].sort((a,b) => b.score - a.score).slice(0, 5).map((p, idx) => (
+                   <div key={p.id} className={`p-6 rounded-[2rem] flex justify-between items-center transition-all ${p.id === currentPlayer.id ? 'bg-yellow-400/20 border-2 border-yellow-400/50 shadow-[0_0_20px_rgba(255,240,0,0.1)]' : 'bg-white/5'}`}>
+                      <div className="flex items-center gap-5">
+                        <span className="font-black text-white/20 text-2xl">{idx+1}</span>
+                        <span className="font-bold text-white uppercase text-xl">{p.name} {p.id === currentPlayer.id ? '(YOU)' : ''}</span>
                       </div>
-                      <span className="font-mono text-yellow-400 font-black text-xl">{p.score}</span>
+                      <span className="font-mono text-yellow-400 font-black text-3xl">{p.score}</span>
                    </div>
                  ))}
               </div>
-              <p className="text-white/30 text-xs font-bold uppercase animate-pulse">等待主持人進行下一步...</p>
+              <p className="text-white/20 text-sm font-bold uppercase animate-pulse tracking-widest">WAITING FOR MOTHERBOARD...</p>
             </div>
           )}
         </div>
