@@ -47,6 +47,19 @@ export default function App() {
     localStorage.setItem('BB_CUSTOM_API_KEY', customApiKey);
   }, [customApiKey]);
 
+  // 母體自動跳轉邏輯：當所有參與對戰的玩家都作答後，自動進入排名畫面
+  useEffect(() => {
+    if (role === GameRole.HOST && gameState === GameState.QUESTION) {
+      const activePlayers = players.filter(p => p.hasAccepted);
+      if (activePlayers.length > 0 && activePlayers.every(p => p.lastAnswer !== undefined)) {
+        const timer = setTimeout(() => {
+          setGameState(GameState.LEADERBOARD);
+        }, 2000); // 留 2 秒讓主機看清楚最後一個人的作答狀態
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [players, gameState, role]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sid = params.get('session');
@@ -95,7 +108,8 @@ export default function App() {
       const q = await generateBigBangQuestions([], customApiKey);
       updateQuestions(q);
       updateCurrentIndex(-1);
-      updatePlayers(playersRef.current.map(p => ({ ...p, isInvited: false, hasAccepted: false, lastAnswer: undefined })));
+      // 重置所有人對戰狀態，進入挑戰邀請環節
+      updatePlayers(playersRef.current.map(p => ({ ...p, isInvited: false, hasAccepted: false, lastAnswer: undefined, isCorrect: undefined })));
       setGameState(GameState.CHALLENGE_INVITE);
     } catch (e) {
       console.error("生成題目失敗", e);
@@ -172,6 +186,7 @@ export default function App() {
   };
 
   const startBattleAfterInvite = () => {
+    // 確保只清除參與者的上一題答案，不重置總分
     updatePlayers(playersRef.current.map(p => ({ ...p, lastAnswer: undefined, isCorrect: undefined })));
     updateCurrentIndex(0);
     setGameState(GameState.QUESTION);
@@ -303,7 +318,7 @@ export default function App() {
               <div className="space-y-6">
                 <span className="bg-yellow-400 text-black px-12 py-3 rounded-full font-black text-3xl uppercase italic shadow-2xl">STAGE {currentIndex + 1}</span>
                 <h2 className="text-6xl font-black leading-tight drop-shadow-2xl tracking-tighter px-10">{currentQ.text}</h2>
-                <div className="text-white/40 font-bold text-4xl uppercase tracking-widest">已作答: <span className="text-yellow-400 font-black">{players.filter(p => p.lastAnswer).length}</span> / {players.length}</div>
+                <div className="text-white/40 font-bold text-4xl uppercase tracking-widest">已作答: <span className="text-yellow-400 font-black">{players.filter(p => p.hasAccepted && p.lastAnswer).length}</span> / {players.filter(p => p.hasAccepted).length}</div>
               </div>
               <div className="grid grid-cols-2 gap-10 max-w-6xl mx-auto">
                 {currentQ.options.map((opt, i) => (
@@ -322,7 +337,7 @@ export default function App() {
                <h2 className="text-[10rem] font-black text-center italic bigbang-yellow uppercase leading-none drop-shadow-2xl">{gameState === GameState.FINISHED ? 'FINAL KINGS' : 'RANKINGS'}</h2>
                <div className="max-w-5xl mx-auto space-y-6">
                   {[...players].sort((a,b) => b.score - a.score).map((p, idx) => (
-                    <div key={p.id} className="glass-card flex items-center justify-between p-12 rounded-[3.5rem] border border-white/10">
+                    <div key={p.id} className={`glass-card flex items-center justify-between p-12 rounded-[3.5rem] border ${p.hasAccepted ? 'border-yellow-400/50 bg-yellow-400/5' : 'border-white/10'}`}>
                       <div className="flex items-center gap-12"><span className="text-7xl font-black text-white/10 w-24">{idx+1}</span><span className="text-5xl font-black uppercase">{p.name}</span></div>
                       <div className="flex items-center gap-12">{idx < 3 && <span className="animate-bounce">{CROWN_SVG(72, idx === 0 ? COLORS.GOLD : idx === 1 ? COLORS.SILVER : COLORS.BRONZE)}</span>}<span className="text-8xl font-mono text-yellow-400 font-black">{p.score}</span></div>
                     </div>
