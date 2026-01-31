@@ -24,7 +24,8 @@ export interface BigBangMember {
 export interface Question {
   id: number;
   text: string;
-  correctAnswer: string; // Stage Name
+  options: string[]; // 新增：四個動態選項
+  correctAnswer: string; 
   funFact?: string;
 }
 
