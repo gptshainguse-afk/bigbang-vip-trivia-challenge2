@@ -302,12 +302,12 @@ export default function App() {
             <div className="text-center space-y-12">
               <div className="space-y-6">
                 <span className="bg-yellow-400 text-black px-12 py-3 rounded-full font-black text-3xl uppercase italic shadow-2xl">STAGE {currentIndex + 1}</span>
-                <h2 className="text-9xl font-black leading-tight drop-shadow-2xl tracking-tighter px-10">{currentQ.text}</h2>
+                <h2 className="text-6xl font-black leading-tight drop-shadow-2xl tracking-tighter px-10">{currentQ.text}</h2>
                 <div className="text-white/40 font-bold text-4xl uppercase tracking-widest">已作答: <span className="text-yellow-400 font-black">{players.filter(p => p.lastAnswer).length}</span> / {players.length}</div>
               </div>
               <div className="grid grid-cols-2 gap-10 max-w-6xl mx-auto">
                 {currentQ.options.map((opt, i) => (
-                  <div key={i} className="glass-card py-20 rounded-[4rem] border border-white/10 text-6xl font-black text-white/90 shadow-2xl flex items-center justify-center px-6 text-center leading-tight min-h-[12rem]">{opt}</div>
+                  <div key={i} className="glass-card py-12 rounded-[4rem] border border-white/10 text-4xl font-black text-white/90 shadow-2xl flex items-center justify-center px-6 text-center leading-tight min-h-[10rem]">{opt}</div>
                 ))}
               </div>
               <div className="flex justify-center gap-10 pt-10">
@@ -352,28 +352,28 @@ export default function App() {
     return (
       <div className="min-h-screen p-8 flex flex-col bg-zinc-950 relative overflow-hidden">
         {currentPlayer.isInvited && !currentPlayer.hasAccepted && <div className="absolute inset-0 bg-yellow-400/20 animate-pulse z-0 pointer-events-none" />}
-        <header className="flex justify-between items-center mb-10 border-b border-white/10 pb-8 relative z-10"><span className="font-black text-3xl text-white uppercase">{currentPlayer.name}</span><span className="bigbang-yellow font-black text-6xl">{currentPlayer.score}</span></header>
+        <header className="flex justify-between items-center mb-10 border-b border-white/10 pb-8 relative z-10"><span className="font-black text-2xl text-white uppercase">{currentPlayer.name}</span><span className="bigbang-yellow font-black text-5xl">{currentPlayer.score}</span></header>
 
         <div className="flex-1 flex flex-col justify-center relative z-10">
           {gameState === GameState.JOINING ? (
-            <div className="text-center space-y-12"><p className="text-[10rem] drop-shadow-[0_0_50px_rgba(255,240,0,0.5)]">👑</p><h2 className="text-5xl font-black text-white animate-pulse">CONNECTED</h2></div>
+            <div className="text-center space-y-12"><p className="text-[8rem] drop-shadow-[0_0_50px_rgba(255,240,0,0.5)]">👑</p><h2 className="text-4xl font-black text-white animate-pulse">CONNECTED</h2></div>
           ) : gameState === GameState.CHALLENGE_INVITE ? (
              <div className="text-center space-y-10">
-                {currentPlayer.isInvited ? (currentPlayer.hasAccepted ? <div className="space-y-8 animate-in zoom-in"><p className="text-9xl">🔥</p><h2 className="text-5xl font-black text-green-500 italic uppercase">BATTLE READY</h2><p className="text-white/40 font-bold">Waiting for host to drop the beat...</p></div> : <div className="space-y-12 animate-in slide-in-from-top-10"><h2 className="text-7xl font-black bigbang-yellow italic leading-none drop-shadow-[0_0_40px_rgba(255,240,0,0.5)]">YOU HAVE BEEN CHALLENGED!</h2><button onClick={confirmChallengeAccept} className="w-full bg-white text-black py-16 rounded-[4rem] text-5xl font-black shadow-[0_30px_60px_rgba(255,255,255,0.2)] animate-bounce active:scale-90 transition-all uppercase">ACCEPT THE CHALLENGE</button></div>) : <div className="space-y-8 opacity-40"><p className="text-9xl">⏳</p><h2 className="text-4xl font-black text-white italic uppercase">STAND BY</h2><p className="text-white/40">The host is selecting candidates for the next battle...</p></div>}
+                {currentPlayer.isInvited ? (currentPlayer.hasAccepted ? <div className="space-y-8 animate-in zoom-in"><p className="text-8xl">🔥</p><h2 className="text-4xl font-black text-green-500 italic uppercase">BATTLE READY</h2><p className="text-white/40 font-bold">Waiting for host to drop the beat...</p></div> : <div className="space-y-12 animate-in slide-in-from-top-10"><h2 className="text-5xl font-black bigbang-yellow italic leading-none drop-shadow-[0_0_40px_rgba(255,240,0,0.5)]">YOU HAVE BEEN CHALLENGED!</h2><button onClick={confirmChallengeAccept} className="w-full bg-white text-black py-12 rounded-[4rem] text-4xl font-black shadow-[0_30px_60px_rgba(255,255,255,0.2)] animate-bounce active:scale-90 transition-all uppercase">ACCEPT</button></div>) : <div className="space-y-8 opacity-40"><p className="text-8xl">⏳</p><h2 className="text-3xl font-black text-white italic uppercase">STAND BY</h2><p className="text-white/40">The host is selecting candidates...</p></div>}
              </div>
           ) : gameState === GameState.QUESTION && currentQ ? (
             <div className="space-y-10">
-               <div className="text-center bg-white/5 p-12 rounded-[3.5rem] border border-white/10 shadow-2xl"><p className="text-yellow-400 font-black text-sm mb-5 italic">Question {currentIndex + 1}</p><h3 className="text-4xl font-bold text-white">{currentQ.text}</h3></div>
-               <div className="grid gap-5">
+               <div className="text-center bg-white/5 p-8 rounded-[3.5rem] border border-white/10 shadow-2xl"><p className="text-yellow-400 font-black text-xs mb-3 italic">Question {currentIndex + 1}</p><h3 className="text-2xl font-bold text-white leading-tight">{currentQ.text}</h3></div>
+               <div className="grid gap-4">
                 {currentQ.options.map((opt, i) => (
-                  <button key={i} onClick={() => submitAnswer(opt)} disabled={!!currentPlayer.lastAnswer} className={`p-8 rounded-[3rem] text-3xl font-black transition-all border-4 min-h-[6rem] ${currentPlayer.lastAnswer === opt ? 'bg-yellow-400 text-black border-yellow-400 scale-95' : 'bg-white/5 text-white border-white/10'}`}>{opt}</button>
+                  <button key={i} onClick={() => submitAnswer(opt)} disabled={!!currentPlayer.lastAnswer} className={`p-6 rounded-[2.5rem] text-xl font-black transition-all border-4 min-h-[5rem] flex items-center justify-center text-center ${currentPlayer.lastAnswer === opt ? 'bg-yellow-400 text-black border-yellow-400 scale-95' : 'bg-white/5 text-white border-white/10'}`}>{opt}</button>
                 ))}
                </div>
             </div>
           ) : (
             <div className="text-center space-y-10">
-              <h2 className="text-7xl font-black bigbang-yellow italic uppercase">{gameState === GameState.FINISHED ? 'THE END' : 'STANDINGS'}</h2>
-              <div className="space-y-4">{[...players].sort((a,b) => b.score - a.score).slice(0, 5).map((p, idx) => <div key={p.id} className={`p-8 rounded-[3rem] flex justify-between items-center ${p.id === currentPlayer.id ? 'bg-yellow-400/20 border-2 border-yellow-400/50' : 'bg-white/5'}`}><span className="font-bold text-white uppercase text-2xl">{idx+1}. {p.name}</span><span className="font-mono text-yellow-400 font-black text-4xl">{p.score}</span></div>)}</div>
+              <h2 className="text-6xl font-black bigbang-yellow italic uppercase">{gameState === GameState.FINISHED ? 'THE END' : 'STANDINGS'}</h2>
+              <div className="space-y-4">{[...players].sort((a,b) => b.score - a.score).slice(0, 5).map((p, idx) => <div key={p.id} className={`p-6 rounded-[2.5rem] flex justify-between items-center ${p.id === currentPlayer.id ? 'bg-yellow-400/20 border-2 border-yellow-400/50' : 'bg-white/5'}`}><span className="font-bold text-white uppercase text-xl">{idx+1}. {p.name}</span><span className="font-mono text-yellow-400 font-black text-3xl">{p.score}</span></div>)}</div>
             </div>
           )}
         </div>
