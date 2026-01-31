@@ -10,24 +10,25 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = [], cus
     return getFallbackQuestions();
   }
 
-  console.log(`[GeminiService] Fetching questions... (Key prefix: ${apiKey.substring(0, 5)})`);
-
   try {
     const ai = new GoogleGenAI({ apiKey });
     
-    const systemInstruction = `你是一位資深的 BIGBANG (GD, T.O.P, Taeyang, Daesung) 鐵粉專家。
-    請生成 10 題高難度的繁體中文問答。
+    const systemInstruction = `你是一位服務於 BIGBANG 頂級粉絲 (VIP) 的專業互動遊戲出題者。
+    請生成 10 題高難度的繁體中文問答，主題圍繞 GD, T.O.P, Taeyang, Daesung。
 
-    【嚴格格式要求】：
-    1. correctAnswer 屬性必須從這四個選項中擇一： "G-Dragon", "T.O.P", "Taeyang", "Daesung"。
-    2. 禁止提及勝利 (Seungri)。
-    3. 題目內容：必須包含 2024-2025 的最新動態（如大聲的《家大聲》、GD 參加 2024 MAMA、太陽的巡演）、經典綜藝梗（如《家族誕生》、GD 的壽司頭）。
-    4. 必須嚴格返回 JSON 陣列。
-    5. 不要重複以下題目：${usedQuestions.join('、')}。`;
+    【出題原則】：
+    1. **高難度選項**：選項不應只是成員名字。針對題目設計 4 個相似或具干擾性的選項（例如：正確日期 vs 錯誤日期、相似的表演名稱）。
+    2. **去線索化**：題目中嚴禁出現會直接暗示答案的關鍵字（例如：如果答案是大聲，題目不應出現「家大聲」或「阿呆阿瓜」）。
+    3. **主題多樣化**：
+       - 2024-2025 最新動態（GD 的《Power》宣傳細節、太陽的《THE LIGHT YEAR》巡演細節、大聲的音樂劇或 YouTube 梗）。
+       - 經典趣聞：綜藝節目中的具體對話、舞台事故、成員間的冷知識。
+       - 時尚與藝術：T.O.P 的收藏細節、GD 的品牌聯名細節。
+    4. **嚴格禁令**：絕對禁止提及勝利 (Seungri) 及其相關事件。
+    5. **格式要求**：必須返回 JSON 陣列，每題包含 id, text, options (4個字串), correctAnswer (必須是 options 之一), funFact。`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "請開始生成 10 題高品質的 VIP 鐵粉問答。",
+      contents: "請開始為 VIP 生成 10 題極具挑戰性的多樣化題目。",
       config: {
         systemInstruction,
         responseMimeType: "application/json",
@@ -38,10 +39,15 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = [], cus
             properties: {
               id: { type: Type.NUMBER },
               text: { type: Type.STRING },
+              options: { 
+                type: Type.ARRAY, 
+                items: { type: Type.STRING },
+                description: "固定 4 個選項"
+              },
               correctAnswer: { type: Type.STRING },
               funFact: { type: Type.STRING }
             },
-            required: ["id", "text", "correctAnswer", "funFact"]
+            required: ["id", "text", "options", "correctAnswer", "funFact"]
           }
         }
       }
@@ -50,21 +56,14 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = [], cus
     let rawText = response.text || "";
     rawText = rawText.replace(/```json|```/g, "").trim();
     
-    console.log("[GeminiService] Raw AI Response:", rawText);
-    
     const result = JSON.parse(rawText);
-    if (Array.isArray(result) && result.length > 0) {
-      // 確保屬性名稱正確
-      const sanitized = result.map((q: any) => ({
-        id: q.id || Date.now(),
-        text: q.text || "未知題目",
-        correctAnswer: q.correctAnswer || q.answer || q.correct_answer || "",
-        funFact: q.funFact || ""
+    if (Array.isArray(result)) {
+      return result.map((q: any) => ({
+        ...q,
+        options: q.options.length === 4 ? q.options : [...q.options, "無選項A", "無選項B", "無選項C", "無選項D"].slice(0, 4)
       }));
-      console.log("[GeminiService] Sanitized Success:", sanitized[0]);
-      return sanitized;
     }
-    throw new Error("Invalid array format");
+    throw new Error("Invalid output format");
     
   } catch (error) {
     console.error("[GeminiService] AI Error:", error);
@@ -75,10 +74,19 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = [], cus
 function getFallbackQuestions(): Question[] {
   const now = Date.now();
   return [
-    { id: now + 1, text: "在《家族誕生》中，大聲與哪位主持人組成了經典的「阿呆阿瓜」？", correctAnswer: "Daesung", funFact: "這是大聲在綜藝界大放異彩的開始！" },
-    { id: now + 2, text: "GD 曾在 MAMA 典禮上以哪種造型驚豔全場，被戲稱為「壽司頭」？", correctAnswer: "G-Dragon", funFact: "那個造型當時引起了時尚圈極大討論。" },
-    { id: now + 3, text: "太陽的經典情歌《眼、鼻、嘴》是寫給哪位女藝人的？", correctAnswer: "Taeyang", funFact: "也就是他現在的妻子閔孝琳。" },
-    { id: now + 4, text: "誰在 2024 年開設了個人 YouTube 節目《家大聲》？", correctAnswer: "Daesung", funFact: "節目邀請了 GD 與太陽，展現了團體不變的情誼。" },
-    { id: now + 5, text: "哪位成員以喜愛椅子與藝術品收藏聞名？", correctAnswer: "T.O.P", funFact: "他對藝術的熱愛眾所皆知，甚至曾擔任拍賣會策劃。" }
+    { 
+      id: now + 1, 
+      text: "在 2024 MAMA 頒獎典禮上，G-Dragon 回歸舞台表演的第一首曲目是？", 
+      options: ["POWER", "HOMEBOY", "COUP D'ETAT", "ONE OF A KIND"],
+      correctAnswer: "POWER", 
+      funFact: "這是 GD 闊別多年再次登上 MAMA 舞台，引起全球轟動！" 
+    },
+    { 
+      id: now + 2, 
+      text: "太陽曾在巡演中表示，哪一首歌是他在洗澡時獲得靈感創作的？", 
+      options: ["Wedding Dress", "Ringa Linga", "Eyes, Nose, Lips", "VIBE"],
+      correctAnswer: "Eyes, Nose, Lips", 
+      funFact: "這首歌紀錄了他對妻子的真摯情感。" 
+    }
   ];
 }
