@@ -43,7 +43,6 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('BB_CUSTOM_API_KEY', customApiKey); }, [customApiKey]);
 
-  // 初始進入判斷
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sid = params.get('session');
@@ -80,7 +79,6 @@ export default function App() {
       const q = await generateBigBangQuestions([], difficulty, customApiKey);
       updateQuestions(q);
       updateCurrentIndex(-1);
-      // 產題後，如果是第一輪，會直接在下一步由母體點擊 Start。如果是 NEW BATTLE，則會回到邀請畫面。
       setGameState(GameState.CHALLENGE_INVITE);
     } catch (e) { console.error("生成題目失敗", e); } 
     finally { setIsSyncing(false); }
@@ -137,7 +135,6 @@ export default function App() {
     if (role === GameRole.HOST && peerStatus === 'CONNECTED') broadcast();
   }, [gameState, currentIndex, players, questions, role, peerStatus, broadcast, timeLeft, isRevealing]);
 
-  // 母體端計時器
   useEffect(() => {
     if (role !== GameRole.HOST) return;
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -149,7 +146,6 @@ export default function App() {
     return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
   }, [gameState, timeLeft, isRevealing, role]);
 
-  // 母體自動跳轉邏輯
   useEffect(() => {
     if (role !== GameRole.HOST || gameState !== GameState.QUESTION || isRevealing) return;
 
@@ -161,7 +157,7 @@ export default function App() {
         if (autoAdvanceTimeoutRef.current) clearTimeout(autoAdvanceTimeoutRef.current);
         autoAdvanceTimeoutRef.current = setTimeout(() => {
             nextQuestion();
-        }, 3000); // 顯示 3 秒答案後跳下一題
+        }, 4000); 
     }
   }, [players, timeLeft, gameState, role, isRevealing]);
 
@@ -266,8 +262,9 @@ export default function App() {
 
   if (role === GameRole.HOST) {
     const currentQ = questions[currentIndex];
-    const activePlayersCount = players.filter(p => p.hasAccepted).length;
-    const answeredCount = players.filter(p => p.hasAccepted && p.lastAnswer).length;
+    const acceptedPlayers = players.filter(p => p.hasAccepted);
+    const activePlayersCount = acceptedPlayers.length;
+    const answeredCount = acceptedPlayers.filter(p => p.lastAnswer).length;
 
     return (
       <div className="min-h-screen p-10 max-w-7xl mx-auto flex flex-col bg-black overflow-hidden">
@@ -332,10 +329,11 @@ export default function App() {
           )}
 
           {gameState === GameState.QUESTION && currentQ && (
-            <div className="text-center space-y-8">
+            <div className="text-center space-y-8 flex flex-col h-full">
               <div className="relative h-4 w-full bg-white/10 rounded-full overflow-hidden mb-4">
                 <div className="absolute top-0 left-0 h-full bg-yellow-400 rounded-full transition-all duration-1000 linear" style={{ width: `${(timeLeft || 0) / timerDuration * 100}%` }}/>
               </div>
+              
               <div className="space-y-4">
                 <span className="bg-yellow-400 text-black px-12 py-3 rounded-full font-black text-3xl uppercase italic shadow-2xl">STAGE {currentIndex + 1}</span>
                 <h2 className="text-6xl font-black leading-tight drop-shadow-2xl tracking-tighter px-10">{currentQ.text}</h2>
@@ -343,19 +341,52 @@ export default function App() {
                   <div className="text-white/40 font-bold text-4xl uppercase tracking-widest">已作答: <span className="text-yellow-400 font-black">{answeredCount}</span> / {activePlayersCount}</div>
                   <div className={`text-6xl font-black ${timeLeft && timeLeft <= 3 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{timeLeft}s</div>
                 </div>
-                 {isRevealing && <p className="text-green-400 font-black text-2xl animate-pulse">正在揭曉答案...</p>}
               </div>
-              <div className="grid grid-cols-2 gap-8 max-w-6xl mx-auto">
+
+              <div className="grid grid-cols-2 gap-8 max-w-6xl mx-auto w-full">
                 {currentQ.options.map((opt, i) => {
                     const isCorrect = opt === currentQ.correctAnswer;
+                    const pickCount = acceptedPlayers.filter(p => p.lastAnswer === opt).length;
                     return (
-                        <div key={i} className={`glass-card py-12 rounded-[4rem] border-4 text-4xl font-black text-white/90 shadow-2xl flex items-center justify-center px-6 text-center leading-tight min-h-[10rem] transition-all duration-300 ${isRevealing && isCorrect ? 'border-green-500 bg-green-500/10 scale-105' : 'border-white/10'}`}>{opt}</div>
+                        <div key={i} className={`glass-card relative py-12 rounded-[4rem] border-4 text-4xl font-black text-white/90 shadow-2xl flex items-center justify-center px-6 text-center leading-tight min-h-[10rem] transition-all duration-300 ${isRevealing && isCorrect ? 'border-green-500 bg-green-500/10 scale-105' : 'border-white/10'}`}>
+                          {opt}
+                          {isRevealing && pickCount > 0 && (
+                            <div className="absolute -top-4 -right-4 bg-yellow-400 text-black px-6 py-2 rounded-full text-2xl animate-in zoom-in font-black shadow-xl">
+                              {pickCount} 人選了
+                            </div>
+                          )}
+                        </div>
                     );
                 })}
               </div>
-              <div className="flex justify-center gap-10 pt-6">
-                <button onClick={() => setGameState(GameState.LEADERBOARD)} className="bg-white/10 px-16 py-7 rounded-3xl font-black text-3xl">查看即時排名</button>
-                <button onClick={nextQuestion} className="bg-white/5 px-16 py-7 rounded-3xl font-black text-3xl text-white/40 hover:text-white">手動跳過</button>
+
+              {/* VIP 實時狀態區 */}
+              <div className="flex-1 flex flex-col justify-end pb-10">
+                <div className="glass-card p-6 rounded-[3rem] border-white/5 bg-white/5">
+                  <p className="text-white/20 text-xs font-black uppercase tracking-[0.3em] mb-4">VIP LIVE STATUS</p>
+                  <div className="flex flex-wrap justify-center gap-4">
+                    {acceptedPlayers.map(p => {
+                      const hasAnswered = !!p.lastAnswer;
+                      return (
+                        <div 
+                          key={p.id} 
+                          className={`px-8 py-3 rounded-2xl font-black text-2xl transition-all duration-300 border-2 ${
+                            hasAnswered 
+                              ? 'bg-yellow-400 text-black border-yellow-400 scale-105 animate-in bounce-in' 
+                              : 'bg-white/5 text-white/20 border-white/10'
+                          }`}
+                        >
+                          {p.name}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-center gap-10 pb-4">
+                <button onClick={() => setGameState(GameState.LEADERBOARD)} className="bg-white/10 px-16 py-7 rounded-3xl font-black text-3xl">查看排名</button>
+                <button onClick={nextQuestion} className="bg-white/5 px-16 py-7 rounded-3xl font-black text-3xl text-white/40 hover:text-white">跳過</button>
               </div>
             </div>
           )}
