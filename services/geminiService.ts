@@ -1,8 +1,8 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Question } from "../types";
+import { Question, Difficulty } from "../types";
 
-export const generateBigBangQuestions = async (usedQuestions: string[] = [], customKey?: string): Promise<Question[]> => {
+export const generateBigBangQuestions = async (usedQuestions: string[] = [], difficulty: Difficulty = Difficulty.NORMAL, customKey?: string): Promise<Question[]> => {
   const apiKey = customKey || process.env.API_KEY;
 
   if (!apiKey) {
@@ -12,9 +12,25 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = [], cus
 
   try {
     const ai = new GoogleGenAI({ apiKey });
+
+    let difficultyInstruction = '';
+    switch (difficulty) {
+      case Difficulty.EASY:
+        difficultyInstruction = '所有題目都必須是基礎級別，答案可以在維基百科上輕易找到，例如成員生日、出道日期或重大公共事件。';
+        break;
+      case Difficulty.HARD:
+        difficultyInstruction = '題目組合應為 30% 基礎題和 70% 深度題。深度題需要粉絲深入了解網路資料，例如個人品牌理念、未公開的幕後故事或特定採訪的細節。';
+        break;
+      case Difficulty.NORMAL:
+      default:
+        difficultyInstruction = '題目組合應為 70% 基礎題和 30% 深度題。這是一個平衡的難度。';
+        break;
+    }
     
     const systemInstruction = `你是一位服務於 BIGBANG 頂級粉絲 (VIP) 的專業互動遊戲出題者。
     請生成 10 題高難度的繁體中文問答，主題圍繞 GD, T.O.P, Taeyang, Daesung。
+
+    【難度要求】：${difficultyInstruction}
 
     【出題原則】：
     1. **高難度選項**：選項不應只是成員名字。針對題目設計 4 個相似或具干擾性的選項（例如：正確日期 vs 錯誤日期、相似的表演名稱）。
@@ -28,7 +44,7 @@ export const generateBigBangQuestions = async (usedQuestions: string[] = [], cus
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "請開始為 VIP 生成 10 題極具挑戰性的多樣化題目。",
+      contents: `請開始為 VIP 生成 10 題【${difficulty}】難度的題目。`,
       config: {
         systemInstruction,
         responseMimeType: "application/json",
