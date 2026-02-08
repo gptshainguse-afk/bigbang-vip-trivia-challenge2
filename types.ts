@@ -14,6 +14,12 @@ export enum GameState {
   CHALLENGE_INVITE = 'CHALLENGE_INVITE'
 }
 
+export enum Difficulty {
+  EASY = '簡單',
+  NORMAL = '普通',
+  HARD = '困難'
+}
+
 export interface BigBangMember {
   id: string;
   name: string;
@@ -24,7 +30,7 @@ export interface BigBangMember {
 export interface Question {
   id: number;
   text: string;
-  options: string[]; // 新增：四個動態選項
+  options: string[];
   correctAnswer: string; 
   funFact?: string;
 }
@@ -45,4 +51,5 @@ export interface GameSyncMessage {
   currentQuestionIndex: number;
   players: Player[];
   sessionId: string;
+  timerDuration: number;
 }
